@@ -11,19 +11,34 @@ fetch_available_rds_instance_classes() {
 # Function to fetch hourly on-demand cost for an RDS instance class
 fetch_rds_instance_class_cost() {
     local instance_class=$1
+    local deploymentOption=$2
+    local databaseEngine=$3
+    licenseModel="License included"
+    if [ $databaseEngine == "postgresql" ]
+    then
+      licenseModel="No license required"
+      #echo "Engine is $databaseEngine, $licenseModel"
+    else
+      licenseModel="License included"
+      #echo "Engine is $databaseEngine, $licenseModel"
+    fi
     aws pricing --region us-east-1 get-products \
         --service-code AmazonRDS \
-        --filters 'Type=TERM_MATCH,Field=instanceType,Value='"$instance_class" Type=TERM_MATCH,Field=regionCode,Value=${region} \
+        --filters 'Type=TERM_MATCH,Field=instanceType,Value='"$instance_class" \
+                  'Type=TERM_MATCH,Field=regionCode,Value='"${region}" \
+                  'Type=TERM_MATCH,Field=deploymentOption,Value='"${deploymentOption}" \
+                  'Type=TERM_MATCH,Field=databaseEngine,Value='"${databaseEngine}" \
+                  'Type=TERM_MATCH,Field=licenseModel,Value='"${licenseModel}" \
         --query 'PriceList[0]' | jq -r > json
     cat json | jq -r .terms.OnDemand[].priceDimensions[].pricePerUnit.USD
-
 }
 
 fetch_rds_instance_current_mem() {
     local instance_class=$1
     aws pricing --region us-east-1 get-products \
         --service-code AmazonRDS \
-        --filters 'Type=TERM_MATCH,Field=instanceType,Value='"$instance_class" Type=TERM_MATCH,Field=regionCode,Value=${region} \
+        --filters 'Type=TERM_MATCH,Field=instanceType,Value='"$instance_class" \
+                  'Type=TERM_MATCH,Field=regionCode,Value='"${region}" \
         --query 'PriceList[0]' | jq -r > json
     memory=$(cat json | jq -r .product.attributes.memory | sed "s/\bGiB\b//g")
 
@@ -48,7 +63,7 @@ fetch_cloudwatch_metric() {
         --end-time "$end_time" \
         --period 86400 \
         --statistics Maximum \
-        --output json  | jq -r .Datapoints | jq 'map(select(.Unit == "Bytes") .Maximum) | max')
+        --output json  | jq -r .Datapoints | jq 'map(select(.Unit == "Bytes") .Maximum) | min')
 
      bytestogb=1000000000
      z=$((Bytes / bytestogb))
@@ -89,23 +104,48 @@ output_file="recommendations.csv"
 # Fetch existing RDS instances
 rds_instance_ids=($(aws rds describe-db-instances --query 'DBInstances[*].DBInstanceIdentifier' --output json | jq -r '.[]'))
 
-# Fetch available EC2 instance types
-#ec2_available_instance_types=($(fetch_available_ec2_instance_types))
-
 # Create CSV file and write header
-echo "Resource, Current Instance Type, Current Allocated Mem, Current Utilization, Current Hourly Cost, Target Instance Type, Target Allocated Memory, Expected Final Utilization, Final Hourly Cost (USD), Savings, Annual Savings" > "$output_file"
+echo "Resource, Resource Name, Engine, Deployment Option, Current Instance Type, Current Allocated Mem, Current Utilization, Current Hourly Cost, Target Instance Type, Target Allocated Memory, Expected Final Utilization, Final Hourly Cost (USD), Savings, Annual Savings" > "$output_file"
 
 # RDS Recommendations
 for instance_id in "${rds_instance_ids[@]}"; do
     current_rds_instance_engine=($(aws rds describe-db-instances --db-instance-identifier $instance_id --query 'DBInstances[*].Engine' --output json | jq -r '.[]'))
     current_rds_instance_class=($(aws rds describe-db-instances --db-instance-identifier $instance_id --query 'DBInstances[*].DBInstanceClass' --output json | jq -r '.[]'))
+    current_rds_instance_multiaz=($(aws rds describe-db-instances --db-instance-identifier $instance_id --query 'DBInstances[*].MultiAZ' --output json | jq -r '.[]'))
+
+    databaseEngine=""
+    if [ $current_rds_instance_engine == "aurora-postgresql" ] || [ $current_rds_instance_engine == "postgres" ]
+    then
+      databaseEngine="postgresql"
+      #echo "Engine is $databaseEngine"
+    elif [ $current_rds_instance_engine == "aurora-mysql" ] || [ $current_rds_instance_engine == "mysql" ]
+    then
+      databaseEngine="mysql"
+      #echo "Engine is $databaseEngine"
+    else
+      databaseEngine=$current_rds_instance_engine
+      #echo "Engine is $databaseEngine"
+    fi
+
+    deploymentOption=""
+    if [ $current_rds_instance_multiaz == "false" ]
+    then
+      echo "Cluster is single AZ"
+      deploymentOption="Single-AZ"
+    else
+      echo "Cluster is single AZ"
+      deploymentOption="Multi-AZ"
+    fi
+
     if [ $current_rds_instance_class == "db.serverless" ]
     then
       echo "cluster of type db.serverless is skipped"
-      echo "RDS,$instance_id,$current_rds_instance_class,0,0,0,$current_rds_instance_class,0,0,0,0,0" >> "$output_file"
+      echo "RDS,$instance_id,$databaseEngine,$deploymentOption,$current_rds_instance_class,0,0,0,$current_rds_instance_class,0,0,0,0,0" >> "$output_file"
+
     else
+
       # Fetch available RDS instance classes
-      current_hourly_cost=$(fetch_rds_instance_class_cost "$current_rds_instance_class")
+      current_hourly_cost=$(fetch_rds_instance_class_cost "$current_rds_instance_class" "$deploymentOption" "$databaseEngine")
       rds_available_instance_classes=($(fetch_available_rds_instance_classes "$current_rds_instance_engine"))
 
       current_memory_free=$(fetch_cloudwatch_metric "$instance_id" "FreeableMemory" "AWS/RDS")
@@ -114,7 +154,8 @@ for instance_id in "${rds_instance_ids[@]}"; do
       current_memory_allocated=$(fetch_rds_instance_current_mem "$current_rds_instance_class")
       current_memory_used=$((current_memory_allocated - current_memory_free))
       current_memory_utilization=$(calculate_percentage_utilization "$current_memory_used" "$current_memory_allocated")
-      hourly_cost=$(fetch_rds_instance_class_cost "$current_rds_instance_class")
+      curret_hourly_cost=$(fetch_rds_instance_class_cost "$current_rds_instance_class" "$deploymentOption" "$databaseEngine")
+
       echo "RDS Instance ID: $instance_id"
       echo "Current Memory Utilization: $current_memory_utilization"
       echo "Current Instance Class: $current_memory_utilization"
@@ -124,24 +165,19 @@ for instance_id in "${rds_instance_ids[@]}"; do
          echo $instance_class
          echo $final_memory_allocated
          echo $current_memory_allocated
+
          if [ $instance_class == "db.serverless" ] || [ $final_memory_allocated -gt $current_memory_allocated ]
          then
            echo "either a db.serverless or bigger instance class"
          else
            suggested_utilization_candidate=$(calculate_percentage_utilization "$current_memory_used" "$final_memory_allocated")
-           #if [ $(echo "$suggested_utilization_candidate -le $current_memory_utilization" | bc) -eq 1 ]; then
-           echo "123"
            if (( $(bc <<< "$suggested_utilization_candidate <  $current_memory_utilization"))); then
-             echo "456"
              echo "$instance_class is skipped as utilization is $suggested_utilization_candidate, i.e less then current utlization $current_memory_utilization"
-           #elif [ $(echo "$suggested_utilization_candidate  -ge $UtilizationThreshold" | bc) -eq 1 ]; then
-           echo "789"
-           elif (( $(bc <<< "$suggested_utilization_candidate >=  $UtilizationThreshold"))); then
-             echo "000"
+           elif (( $(bc <<< "$suggested_utilization_candidate >  $UtilizationThreshold"))); then
              echo "$instance_class is skipped as utilization is $suggested_utilization_candidate, i.e greater then $UtilizationThreshold"
            else
              # Fetch hourly on-demand cost
-             hourly_cost=$(fetch_rds_instance_class_cost "$instance_class")
+             hourly_cost=$(fetch_rds_instance_class_cost "$instance_class" "$deploymentOption" "$databaseEngine")
              echo "RDS Recommendation:"
              echo "RDS Instance ID: $instance_id"
              echo "Current Memory Utilization: $current_memory_utilization"
@@ -150,14 +186,11 @@ for instance_id in "${rds_instance_ids[@]}"; do
              echo "Hourly Cost: $hourly_cost"
              echo
              savings=$(echo  "$current_hourly_cost - $hourly_cost" | bc)
-             #if (( $(echo "$savings -lt 0" | bc -l )))
-             echo "777"
              if (( $(bc <<< "$savings < 0"))); then
-               echo "999"
                echo "Instance is not optimized for savings"
              else
                AnnualSavings=$(echo "$savings * 8760" | bc)
-               echo "RDS,$instance_id,$current_rds_instance_class,$current_memory_allocated,$current_memory_utilization,$current_hourly_cost,$instance_class,$final_memory_allocated,$suggested_utilization_candidate,$hourly_cost,$savings,$AnnualSavings" >> "$output_file"
+               echo "RDS,$databaseEngine,$deploymentOption,$instance_id,$current_rds_instance_class,$current_memory_allocated,$current_memory_utilization,$current_hourly_cost,$instance_class,$final_memory_allocated,$suggested_utilization_candidate,$hourly_cost,$savings,$AnnualSavings" >> "$output_file"
              fi
            fi
          fi
