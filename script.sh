@@ -140,7 +140,7 @@ for instance_id in "${rds_instance_ids[@]}"; do
     if [ $current_rds_instance_class == "db.serverless" ]
     then
       echo "cluster of type db.serverless is skipped"
-      echo "RDS,$instance_id,$databaseEngine,$deploymentOption,$current_rds_instance_class,0,0,0,$current_rds_instance_class,0,0,0,0,0" >> "$output_file"
+      echo "RDS,$instance_id,$current_rds_instance_engine,$deploymentOption,$current_rds_instance_class,0,0,0,$current_rds_instance_class,0,0,0,0,0" >> "$output_file"
 
     else
 
@@ -190,7 +190,7 @@ for instance_id in "${rds_instance_ids[@]}"; do
                echo "Instance is not optimized for savings"
              else
                AnnualSavings=$(echo "$savings * 8760" | bc)
-               echo "RDS,$databaseEngine,$deploymentOption,$instance_id,$current_rds_instance_class,$current_memory_allocated,$current_memory_utilization,$current_hourly_cost,$instance_class,$final_memory_allocated,$suggested_utilization_candidate,$hourly_cost,$savings,$AnnualSavings" >> "$output_file"
+               echo "RDS,$current_rds_instance_engine,$deploymentOption,$instance_id,$current_rds_instance_class,$current_memory_allocated,$current_memory_utilization,$current_hourly_cost,$instance_class,$final_memory_allocated,$suggested_utilization_candidate,$hourly_cost,$savings,$AnnualSavings" >> "$output_file"
              fi
            fi
          fi
