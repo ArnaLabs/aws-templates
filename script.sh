@@ -105,7 +105,7 @@ output_file="recommendations.csv"
 rds_instance_ids=($(aws rds describe-db-instances --query 'DBInstances[*].DBInstanceIdentifier' --output json | jq -r '.[]'))
 
 # Create CSV file and write header
-echo "Resource, Resource Name, Engine, Deployment Option, Current Instance Type, Current Allocated Mem, Current Utilization, Current Hourly Cost, Target Instance Type, Target Allocated Memory, Expected Final Utilization, Final Hourly Cost (USD), Savings, Annual Savings" > "$output_file"
+echo "Resource, Engine, Deployment Option, Resource Name, Current Instance Type, Current Allocated Mem, Current Utilization, Current Hourly Cost, Target Instance Type, Target Allocated Memory, Expected Final Utilization, Final Hourly Cost (USD), Savings, Annual Savings" > "$output_file"
 
 # RDS Recommendations
 for instance_id in "${rds_instance_ids[@]}"; do
@@ -140,7 +140,7 @@ for instance_id in "${rds_instance_ids[@]}"; do
     if [ $current_rds_instance_class == "db.serverless" ]
     then
       echo "cluster of type db.serverless is skipped"
-      echo "RDS,$instance_id,$current_rds_instance_engine,$deploymentOption,$current_rds_instance_class,0,0,0,$current_rds_instance_class,0,0,0,0,0" >> "$output_file"
+      echo "RDS,$current_rds_instance_engine,$deploymentOption,$instance_id,$current_rds_instance_class,0,0,0,$current_rds_instance_class,0,0,0,0,0" >> "$output_file"
 
     else
 
