@@ -15,7 +15,7 @@ fetch_available_elasticache_node_types() {
     then
       echo "null"
     else
-      aws elasticache list-allowed-node-type-modifications --replication-group-id "$instance_id" --query 'ScaleDownModifications[]' --output json | jq -r '.[]'
+      aws elasticache list-allowed-node-type-modifications --replication-group-id "$instance_id" --query 'ScaleDownModifications[]' --output json | jq -r '.[]' 
     fi
 
 }
@@ -119,8 +119,8 @@ for instance_id in "${elasticache_cluster_ids[@]}"; do
     else
       for target_node_type in "${available_node_types[@]}"; do
         target_memory_allocated=$(fetch_elasticache_node_type_memory ${cache_engine} ${target_node_type})
-        target_memory_used=$((target_memory_allocated - current_memory_free))
-        target_memory_utilization=$(calculate_percentage_utilization "$target_memory_used" "$target_memory_allocated")
+        #target_memory_used=$((target_memory_allocated - current_memory_free))
+        target_memory_utilization=$(calculate_percentage_utilization "$current_memory_used" "$target_memory_allocated")
         echo "Elastic Cache Instance ID: $instance_id"
         echo "Elastic Cache Current Node Type: $current_elastic_cache_node"
         echo "Elastic Cache MultiAZ: $current_elastic_cache_multiaz"
@@ -132,7 +132,7 @@ for instance_id in "${elasticache_cluster_ids[@]}"; do
         echo "Elastic Cache Current Used: $current_memory_used"
         echo "Elastic Cache Current Utilization: $current_memory_utilization"
         echo "Elastic Cache Target Memory Allocated: $target_memory_allocated"
-        echo "Elastic Cache Target Memory Used: $target_memory_used"
+        #echo "Elastic Cache Target Memory Used: $"
         echo "Elastic Cache Target Memory Utilization: $target_memory_utilization"
 #        if (( $(bc <<< "$target_memory_utilization <  $current_memory_utilization"))); then
 #           echo "$target_node_type is skipped as utilization is $target_memory_utilization, i.e less then current utlization $current_memory_utilization"
